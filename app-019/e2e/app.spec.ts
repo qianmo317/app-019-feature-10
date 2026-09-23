@@ -109,7 +109,7 @@ test.describe('全流程：选类型 → 填尺寸 → 出三视图 → 打印 1
     expect(await page.locator('[data-view="front"]').getAttribute('viewBox')).toBe(frontBox)
   })
 
-  test('打印视图：1:1 校验尺 + 模板页 + 打印调用', async ({ page }) => {
+  test('打印视图：按块分页 + 页眉页码 + 燕尾齿号索引 + 打印调用', async ({ page }) => {
     // 拦截 window.print
     await page.addInitScript(() => {
       ;(window as unknown as { __printed: boolean }).__printed = false
@@ -123,9 +123,22 @@ test.describe('全流程：选类型 → 填尺寸 → 出三视图 → 打印 1
     await page.getByTestId('go-print').click()
 
     await expect(page.getByTestId('print-page')).toBeVisible()
+    // 燕尾：三视图各一页 + 1:1 模板（200mm 默认板切 2 张）+ 校验尺 + 齿号索引 + 切割步骤 = 8 页
+    await expect(page.getByTestId('print-sheet')).toHaveCount(8)
+    // 页眉：方案名 / 榫卯类型 / 页别 / 第 N 页 / 共 M 页
+    await expect(page.getByText('第 1 页 / 共 8 页')).toBeVisible()
+    await expect(page.getByText('第 8 页 / 共 8 页')).toBeVisible()
+    await expect(page.locator('.psh-kind').first()).toHaveText('燕尾榫（穿透式）')
+    // 校验尺与模板页保留
     await expect(page.getByTestId('check-ruler')).toBeVisible()
     await expect(page.getByTestId('check-ruler')).toContainText('100mm')
-    await expect(page.getByText('1:1 模板页')).toBeVisible()
+    // 1:1 模板按 188mm 切片成 2 张拼贴
+    await expect(page.locator('.psh-label', { hasText: '1:1 模板页' })).toHaveCount(2)
+    await expect(page.getByTestId('template-tile')).toHaveCount(2)
+    // 齿号索引：逐齿列出齿顶宽/齿根宽/中心位置
+    const idxRows = page.locator('[data-testid="tooth-index-table"] tbody tr')
+    expect(await idxRows.count()).toBeGreaterThanOrEqual(2)
+    await expect(page.getByTestId('tooth-index')).toContainText('中心位置')
     await page.getByTestId('do-print').click()
     const printed = await page.evaluate(() => (window as unknown as { __printed: boolean }).__printed)
     expect(printed).toBe(true)

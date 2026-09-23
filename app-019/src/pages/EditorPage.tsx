@@ -1,14 +1,15 @@
 // 图纸编辑器：左参数 | 中三视图 | 右切割步骤与提示（蓝图 §6）
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Drawing, JointKind, Params, Wood, Fit } from '../types'
 import { KIND_LABEL } from '../types'
 import { computeJoint } from '../lib/calc'
 import { buildViews } from '../geometry/views'
+import type { ViewModel } from '../geometry/views'
 import { buildCutList } from '../lib/cutlist'
 import { fmt01 } from '../lib/format'
 import { getPlan, upsertPlan, downloadJSON, deletePlan } from '../store/plans'
 import { navigate } from '../router'
-import { ViewSvg, CheckRuler } from '../components/ViewSvg'
+import { ViewSvg, CheckRuler, TemplateTilePage, naturalMm, templateTiles } from '../components/ViewSvg'
 import { ParamForm } from '../components/ParamForm'
 import { DEFAULT_FIT_TABLE, WOOD_LABEL, loadFitTable, saveFitTable, type FitTable } from '../lib/fit'
 
@@ -112,7 +113,7 @@ export function EditorPage({ id }: { id: string }) {
             {computed?.views.map((vm) => <ViewSvg key={vm.id} vm={vm} />)}
           </div>
           <p className="note" data-testid="recalc-ms">重算耗时 {recalcMs.current.toFixed(1)}ms（要求 &lt;100ms）</p>
-          {computed && joint.kind.startsWith('dovetail') && computed.result.dovetail && (
+          {computed && isDovetailKind(joint.kind) && computed.result.dovetail && (
             <ToothTable dt={computed.result.dovetail} />
           )}
         </main>
@@ -253,12 +254,84 @@ export function FitTableEditor() {
   )
 }
 
+// A4 纸 210×297mm，@page 留白 10mm → 可打印区 190×277mm；页眉占约 14mm
+const isDovetailKind = (k: JointKind) => k === 'dovetail' || k === 'half-blind-dovetail'
+const VIEW_BOX = { w: 180, h: 250 }
+
+const VIEW_LABEL: Record<string, string> = {
+  front: '正视图',
+  top: '俯视图',
+  side: '侧视图',
+}
+
+/** 视图缩小到一页内的显示宽度（1:1 模板不缩放，走另一个页） */
+function fitWidthMm(vm: ViewModel): number {
+  const nat = naturalMm(vm)
+  const s = Math.min(VIEW_BOX.w / nat.w, VIEW_BOX.h / nat.h, 1)
+  return Math.max(1, nat.w * s)
+}
+
 export function PrintPage({ id }: { id: string }) {
   const plan = getPlan(id)
   if (!plan) return <div className="page"><p className="error">方案不存在</p></div>
   const joint = plan.joints[0]
   const r = computeJoint(joint)
   const views = buildViews(joint, r)
+  const cut = buildCutList(joint, r.dovetail, r.tenon)
+  const isDovetail = isDovetailKind(joint.kind)
+
+  // 块顺序：三视图（每视图独立起页）→ 1:1 模板（超宽自动多页拼贴）→ 校验尺 → 燕尾齿号索引 → 切割步骤
+  // 一个块可占多页（pages.length），页码与总页数按实际物理页累计
+  type SheetBlock = { label: string; pages: { body: ReactNode; sub?: string }[] }
+  const blocks: SheetBlock[] = []
+  for (const vm of views) {
+    blocks.push({
+      label: `${VIEW_LABEL[vm.id] ?? vm.title}（尺寸标注）`,
+      pages: [{
+        body: (
+          <div className="print-view-block">
+            <ViewSvg vm={vm} widthMm={fitWidthMm(vm)} />
+          </div>
+        ),
+      }],
+    })
+  }
+  if (views[0]) {
+    const tiles = templateTiles(views[0])
+    const sub = tiles.length > 1
+      ? `模板宽于 A4 单页，已按 1:1 切成 ${tiles.length} 张（沿标注竖边拼贴，切勿缩放）`
+      : undefined
+    blocks.push({
+      label: '1:1 模板页（剪下贴在木料上描线）',
+      pages: tiles.map((_, i) => ({
+        sub: i === 0 ? sub : undefined,
+        body: <TemplateTilePage vm={views[0]!} index={i} total={tiles.length} />,
+      })),
+    })
+  }
+  blocks.push({
+    label: '打印校验尺（先校准 1:1）',
+    pages: [{
+      body: (
+        <div className="print-view-block">
+          <CheckRuler />
+        </div>
+      ),
+    }],
+  })
+  if (isDovetail && r.dovetail) {
+    blocks.push({
+      label: '齿号索引（编号与图中圆标一致）',
+      pages: [{ body: <ToothIndex dt={r.dovetail} ratio={joint.params.dovetail?.angleRatio ?? 8} /> }],
+    })
+  }
+  blocks.push({
+    label: '切割步骤',
+    pages: [{ body: <CutSteps cut={cut} /> }],
+  })
+
+  const total = blocks.reduce((s, b) => s + b.pages.length, 0)
+  let pageNo = 0
   return (
     <div className="page print-page" data-testid="print-page">
       <div className="print-toolbar no-print">
@@ -266,30 +339,70 @@ export function PrintPage({ id }: { id: string }) {
           打印（1:1）
         </button>
         <button className="btn" onClick={() => navigate(`/plan/${plan.id}`)}>返回编辑</button>
-        <span className="note">打印前关闭「适应页面/缩放」，选择 A4、100% 缩放</span>
+        <span className="note">共 {total} 页：A4、纵向、100% 缩放；打印前关闭「适应页面/缩放」，先用校验尺核对</span>
       </div>
-      <h1 className="print-title">{plan.title}</h1>
-      <section className="print-section">
-        <h2>校验尺</h2>
-        {views.map((vm) => (
-          <div key={vm.id} className="print-view-block">
-            <ViewSvg vm={vm} widthMm={vm.contentW + 48} />
-          </div>
-        ))}
-        <div className="print-view-block">
-          <CheckRuler />
-        </div>
-      </section>
-      <section className="print-section">
-        <h2>1:1 模板页（剪下贴在木料上描线）</h2>
-        <div className="print-view-block">
-          {views[0] && <ViewSvg vm={views[0]} widthMm={views[0].contentW + 48} />}
-        </div>
-      </section>
-      <section className="print-section">
-        <h2>切割步骤</h2>
-        <CutSteps cut={buildCutList(joint, r.dovetail, r.tenon)} />
-      </section>
+      {blocks.map((b, bi) =>
+        b.pages.map((pg, pi) => {
+          pageNo += 1
+          const same = b.pages.length > 1 ? `（${pi + 1}/${b.pages.length}）` : ''
+          return (
+            <section className="print-sheet" key={`${bi}-${pi}`} data-testid="print-sheet">
+              <header className="print-sheet-head">
+                <div className="psh-left">
+                  <strong className="psh-title" data-testid="psh-title">{plan.title}</strong>
+                  <span className="psh-kind">{KIND_LABEL[joint.kind]}</span>
+                  <span className="psh-label">{b.label}{same}</span>
+                  {pg.sub && <span className="psh-sub">{pg.sub}</span>}
+                </div>
+                <div className="psh-page">第 {pageNo} 页 / 共 {total} 页</div>
+              </header>
+              <div className="print-sheet-body">{pg.body}</div>
+            </section>
+          )
+        }),
+      )}
+    </div>
+  )
+}
+
+/** 燕尾齿号索引：逐行列齿顶宽/齿根宽/中心位置，编号与视图圆标一一对应 */
+function ToothIndex({
+  dt,
+  ratio,
+}: {
+  dt: NonNullable<ReturnType<typeof computeJoint>['dovetail']>
+  ratio: 6 | 7 | 8
+}) {
+  return (
+    <div className="tooth-index" data-testid="tooth-index">
+      <p className="note">
+        编号与正视图/俯视图中的圆标数字一致（从拼接端左到右）；中心位置 = 齿左缘 + 齿顶宽÷2，
+        以齿板展示面左边缘为 0。
+      </p>
+      <table className="tooth-table tooth-index-table" data-testid="tooth-index-table">
+        <thead>
+          <tr>
+            <th>齿号</th>
+            <th>齿顶宽 mm（展示面）</th>
+            <th>齿根宽 mm（背面）</th>
+            <th>中心位置 mm（距左端）</th>
+          </tr>
+        </thead>
+        <tbody>
+          {dt.teeth.map((t) => (
+            <tr key={t.index}>
+              <td><span className="tooth-badge">{t.index}</span></td>
+              <td>{fmt01(t.topW)}</td>
+              <td>{fmt01(t.rootW)}</td>
+              <td>{fmt01(t.faceX + t.topW / 2)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="note">
+        共 {dt.teeth.length} 齿；斜度 1:{ratio}，单边斜移 {fmt01(dt.slopeOffset)}mm；
+        半齿边距 {fmt01(dt.margin)}mm（左右对称）；闭合误差 {dt.closureError.toFixed(3)}mm。
+      </p>
     </div>
   )
 }

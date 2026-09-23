@@ -134,15 +134,72 @@ input[type="number"] { width: 90px; text-align: right; }
 .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .tag { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; font-size: 11px; padding: 1px 8px; color: #666; }
 
+/* —— 打印输出：A4 按块分页，每块独立起页并带页眉 —— */
 .print-page { max-width: 210mm; }
 .print-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
-.print-section { page-break-inside: avoid; break-inside: avoid; margin-bottom: 24px; }
 .print-view-block { display: flex; justify-content: center; }
 .ruler-wrap { text-align: center; }
 
+.print-sheet {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10mm;
+  margin: 0 auto 12px;
+  min-height: 270mm;
+  width: 210mm;
+  max-width: 100%;
+}
+.print-sheet-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  border-bottom: 1.5px solid var(--ink);
+  padding-bottom: 4px; margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.psh-left { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.psh-title { font-size: 15px; }
+.psh-kind { font-size: 12px; color: #444; }
+.psh-label { font-size: 12px; color: #444; }
+.psh-sub { font-size: 11px; color: var(--warn); }
+.psh-page { font-size: 12px; color: #444; white-space: nowrap; }
+.print-sheet-body { display: flex; flex-direction: column; align-items: center; }
+
+.template-svg { max-width: none; }
+.tile-join-line { stroke: var(--warn); stroke-width: 0.5; stroke-dasharray: 3 2; fill: none; }
+.template-tile { display: flex; flex-direction: column; align-items: center; }
+.tile-cap { margin-top: 6px; }
+
+.tooth-index { width: 100%; max-width: 170mm; }
+.tooth-index-table th, .tooth-index-table td { text-align: center; }
+.tooth-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 4px;
+  border: 1px solid var(--ink); border-radius: 50%;
+  font-size: 12px; font-weight: 600;
+}
+.tooth-index .steps li, .print-sheet .steps li { break-inside: avoid; }
+
 @media print {
+  @page { size: A4 portrait; margin: 10mm; }
   .no-print { display: none !important; }
   body { background: #fff; }
-  .page { max-width: none; padding: 0; }
-  .print-section { page-break-inside: avoid; }
+  .app { min-height: 0; }
+  .page { max-width: none; padding: 0; margin: 0; }
+  .print-page { max-width: none; }
+  /* 每个块单独一页：第一页不产生空白页，后续块强制起页 */
+  .print-sheet {
+    border: none; border-radius: 0;
+    padding: 0; margin: 0;
+    min-height: 0; width: auto;
+    page-break-after: always;
+    break-after: page;
+  }
+  .print-sheet:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+  /* 步骤、齿号表行不在页中被劈开（1:1 模板超宽时仍允许浏览器切到第二页拼贴） */
+  .steps li, .cautions li, .tooth-index-table tr {
+    break-inside: avoid;
+  }
 }
