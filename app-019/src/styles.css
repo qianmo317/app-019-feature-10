@@ -134,15 +134,128 @@ input[type="number"] { width: 90px; text-align: right; }
 .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .tag { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; font-size: 11px; padding: 1px 8px; color: #666; }
 
-.print-page { max-width: 210mm; }
+/* —— 打印页：每个逻辑块（.print-sheet）单独成页 —— */
+.print-page { max-width: 297mm; } /* 容纳横向 1:1 模板纸卡，其余纸卡自身限宽 210mm */
 .print-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
-.print-section { page-break-inside: avoid; break-inside: avoid; margin-bottom: 24px; }
 .print-view-block { display: flex; justify-content: center; }
 .ruler-wrap { text-align: center; }
 
+/* 屏幕上每页显示为一张纸卡，便于装订前预览总页数 */
+.print-sheet {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14mm 12mm 12mm;
+  margin: 0 auto 16px;
+  min-height: 260mm;
+  max-width: 210mm;
+  width: 100%;
+}
+/* 1:1 模板页屏幕预览也按横向 A4 纸卡呈现 */
+.print-sheet-landscape {
+  min-height: 170mm;
+  max-width: 297mm;
+}
+.print-sheet-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 2px 16px;
+  border-bottom: 1.5px solid var(--ink);
+  padding-bottom: 6px;
+  margin-bottom: 14px;
+}
+.print-sheet-meta {
+  grid-column: 1;
+  display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
+  font-size: 12px; color: #555;
+}
+.print-sheet-plan { font-size: 14px; color: var(--ink); }
+.print-sheet-kind { color: #666; }
+.print-sheet-title {
+  grid-column: 1;
+  margin: 0;
+  font-size: 15px;
+}
+.print-sheet-note { display: block; font-size: 11px; font-weight: 400; color: #888; margin-top: 2px; }
+.print-sheet-page {
+  grid-row: 1 / 3;
+  grid-column: 2;
+  font-size: 12px;
+  color: #555;
+  white-space: nowrap;
+}
+
+/* 参考视图：打印时缩放到页宽，保证一图一页（屏幕仍按 mm 预览） */
+.print-view-fit .view-svg { max-width: 100%; height: auto; }
+/* 1:1 模板：永远按真实 mm 尺寸，禁止缩放 */
+.print-view-real { justify-content: flex-start; overflow: visible; }
+
+/* 第 1 页方案摘要 */
+.print-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px 18px;
+  margin: 18px 0 0;
+}
+.print-summary div { display: flex; gap: 8px; font-size: 12px; }
+.print-summary dt { color: #777; margin: 0; white-space: nowrap; }
+.print-summary dd { margin: 0; }
+
+/* 齿号索引表：居中列 + 右对齐数值，与编辑器齿宽表同一套边框 */
+.tooth-index .tooth-table th, .tooth-index .tooth-table td { text-align: right; }
+.tooth-index .tooth-table th:first-child, .tooth-index .tooth-table td:first-child { text-align: center; }
+.tooth-index .note { margin-top: 10px; }
+
 @media print {
+  @page { size: A4 portrait; margin: 12mm 10mm; }
+  /* 1:1 模板页用横向 A4，200mm 宽料无需缩放即可完整打印 */
+  @page landscape { size: A4 landscape; margin: 12mm 10mm; }
   .no-print { display: none !important; }
-  body { background: #fff; }
-  .page { max-width: none; padding: 0; }
-  .print-section { page-break-inside: avoid; }
+  html, body { background: #fff; margin: 0; padding: 0; }
+  .page { max-width: none; margin: 0; padding: 0; }
+  .print-page { max-width: none; }
+
+  /* 每个逻辑块单独起页；块内不在页眉/表格行处断裂 */
+  .print-sheet {
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    margin: 0;
+    min-height: 0;
+    max-width: none;
+    page: auto;
+    page-break-before: always;
+    break-before: page;
+  }
+  .print-sheet-landscape { page: landscape; }
+  .print-sheet:first-child {
+    page-break-before: avoid;
+    break-before: avoid;
+  }
+  .print-sheet-head {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+  .print-view-block, .print-sheet table, .print-sheet tr,
+  .print-sheet .steps li, .print-sheet .cautions li {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* 参考视图限制在单页可打印区内：宽超限时按宽缩，高超限时按高缩（SVG 带 viewBox，等比缩放） */
+  .print-view-fit .view-svg { max-width: 190mm; max-height: 250mm; }
+  /* 模板页保持真实尺寸 */
+  .print-view-real .view-svg { max-width: none; max-height: none; }
+
+  /* 打印时页眉页码改由 CSS 计数器生成：逻辑页号让位于物理页号/总页数 */
+  .print-sheet-page { visibility: hidden; position: relative; }
+  .print-sheet-page::after {
+    content: "第 " counter(page) " / " counter(pages) " 页";
+    visibility: visible;
+    position: absolute;
+    right: 0;
+    top: 0;
+    white-space: nowrap;
+  }
 }
